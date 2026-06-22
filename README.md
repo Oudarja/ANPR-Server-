@@ -130,31 +130,42 @@ Converted to:
 
 Stores:
 
-Camera ID
-Track ID
-Plate Number
-Vehicle Type
-Vehicle Color
-Confidence Score
-Plate Image
-Vehicle Image
-Timestamp
+- id
+- camera_id
+- track_id
+- plate_number
+- vehicle_type
+- vehicle_class
+- plate_img_path
+- vehicle_img_path
+- confidence
+- detected_at
+- vehicle_color
+- status
+- notes
+- location_id
+- created_at
+- updated_at
 
 #### Speed Violations
 
 Stores:
-
-Camera ID
-Track ID
-Plate Number
-Vehicle Type
-Vehicle Color
-Speed
-Speed Limit
-Violation Clip
-Vehicle Image
-Plate Image
-Created Timestamp
+- id
+- camera_id
+- track_id
+- plate_number
+- vehicle_type
+- vehicle_class
+- plate_img_path
+- vehicle_img_path
+- confidence
+- speed_kmph
+- speed_limit
+- clip_path
+- vehicle_color
+- violated_at
+- created_at
+- updated_at
 
 ### Installation
 #### Clone Repository
