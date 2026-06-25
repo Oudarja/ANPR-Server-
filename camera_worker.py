@@ -534,6 +534,7 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
     base_upload = Path(UPLOAD_ROOT) / folder_name
     base_upload.mkdir(parents=True, exist_ok=True)
 
+
     save_dir = None
     if is_file:
         try:
@@ -859,6 +860,8 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
                         if vcrop.size > 0: cv2.imwrite(v_path, vcrop)
                         cv2.imwrite(p_path, buf["crop"])
 
+                        
+
                         # -----------here need to insert created at date from the clip by extracting using ocr (pytesseract) and then 
                         # insert into the database along with the other details.----------- 
 
@@ -870,14 +873,16 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
 
                         for frm in ocr_frame_buffer:
                             d, t = find_date_time(frm)
-                            results_ocr.append(f"{d} {t}")
-
-                        vote = Counter(results_ocr)
-
-                        best_timestamp, count = vote.most_common(1)[0]
+                            if d is not None and t is not None:
+                                results_ocr.append(f"{d} {t}")
+                        
+                        if results_ocr:
+                            vote = Counter(results_ocr)
+                            best_timestamp, count = vote.most_common(1)[0]
+                        else:
+                            best_timestamp=None
 
                         # date, time_ = find_date_time(frame_resized)
-
                         # field name in database is created_at, so we need to pass the date and time in the insert_speed_violation function as a string
                         # first date and time need to be combined into a single string in the format of "YYYY-MM-DD HH:MM:SS" and then pass it to the 
                         # insert_speed_violation function.
