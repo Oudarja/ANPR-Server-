@@ -414,6 +414,8 @@ import cv2
 import time
 import os
 import re
+import queue
+import threading
 from pathlib import Path
 from datetime import date
 import numpy as np
@@ -450,6 +452,46 @@ _SIGNAL_MAP = {
 _SIGNAL_POLL_INTERVAL = 2
 _SIGNAL_DEBOUNCE_SEC  = 3.0
 
+
+def _best_ocr_timestamp(frames, tag):
+    results_ocr = []
+
+    for frm in frames:
+        d, t = find_date_time(frm)
+        if d is not None and t is not None:
+            results_ocr.append(f"{d} {t}")
+
+    if not results_ocr:
+        return None
+
+    vote = Counter(results_ocr)
+    best_timestamp, count = vote.most_common(1)[0]
+    print(f"{tag} OCR timestamp: {best_timestamp} ({count}/{len(results_ocr)} votes)")
+    return best_timestamp
+
+
+def _insert_speed_violation_with_ocr(job):
+    tag = job["tag"]
+    payload = job["payload"]
+    payload["created_at"] = _best_ocr_timestamp(job["frames"], tag)
+    insert_speed_violation(**payload)
+
+
+def _ocr_worker(work_queue):
+    while True:
+        job = work_queue.get()
+        if job is None:
+            work_queue.task_done()
+            break
+
+        try:
+            _insert_speed_violation_with_ocr(job)
+        except Exception as e:
+            import traceback
+            print(f"{job.get('tag', '[OCR]')} OCR worker error: {e}")
+            traceback.print_exc()
+        finally:
+            work_queue.task_done()
 
 
 # ─────────────────────────────────────────────────────
@@ -565,6 +607,8 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
 
     cap = None
     clip_manager = None
+    ocr_work_queue = None
+    ocr_thread = None
     counts = {}
 
     # ── return value ──
@@ -597,6 +641,19 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
         plate_model  = YOLO(PLATE_MODEL)
         tracker      = Sort(max_age=20, min_hits=3, iou_threshold=0.2)
         clip_manager = ClipManager(fps, (MONITOR_WIDTH, MONITOR_HEIGHT), clip_dir)
+        
+        # declare ocr working queue
+        ocr_work_queue = queue.Queue(maxsize=20)
+        
+        ocr_thread = threading.Thread(
+            target=_ocr_worker,
+            # queue passed as arg
+            args=(ocr_work_queue,),
+            daemon=True,
+            name=f"ocr-cam-{cam_id}",
+        )
+
+        ocr_thread.start()
 
         # ── State ──
         counts              = {v: 0 for v in VEHICLE_CLASSES.values()}
@@ -862,42 +919,32 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
 
                         
 
-                        # -----------here need to insert created at date from the clip by extracting using ocr (pytesseract) and then 
-                        # insert into the database along with the other details.----------- 
+                        speed_payload = {
+                            "camera_id": db_camera_id,
+                            "track_id": track_id,
+                            "plate_number": buf["number"],
+                            "vehicle_type": buf["vtype"],
+                            "vehicle_class": stored_cls,
+                            "plate_img_path": _normalize_db_path(p_path),
+                            "vehicle_img_path": _normalize_db_path(v_path),
+                            "confidence": buf["score"],
+                            "speed_kmph": speed_kmph,
+                            "speed_limit": SPEED_LIMIT_KMPH,
+                            "clip_path": clip_path,
+                            "vehicle_color": vehicle_color,
+                        }
+                        ocr_job = {
+                            "tag": TAG,
+                            "frames": [frm.copy() for frm in ocr_frame_buffer],
+                            "payload": speed_payload,
+                        }
 
-                        # from this clip_path , extract the date and time using OCR and then pass it to the insert_speed_violation function.
+                        try:
+                            ocr_work_queue.put_nowait(ocr_job)
+                        except queue.Full:
+                            print(f"{TAG} OCR queue full; inserting speed violation without OCR timestamp")
+                            insert_speed_violation(**speed_payload, created_at=None)
 
-                        # store the date and time extracted from the frame using OCR and pass in to insert function for insertion
-                        # take clip from clip_path and extract the date and time from the frame using OCR and then pass it to the insert_speed_violation function.
-                        results_ocr = []
-
-                        for frm in ocr_frame_buffer:
-                            d, t = find_date_time(frm)
-                            if d is not None and t is not None:
-                                results_ocr.append(f"{d} {t}")
-                        
-                        if results_ocr:
-                            vote = Counter(results_ocr)
-                            best_timestamp, count = vote.most_common(1)[0]
-                        else:
-                            best_timestamp=None
-
-                        # date, time_ = find_date_time(frame_resized)
-                        # field name in database is created_at, so we need to pass the date and time in the insert_speed_violation function as a string
-                        # first date and time need to be combined into a single string in the format of "YYYY-MM-DD HH:MM:SS" and then pass it to the 
-                        # insert_speed_violation function.
-                        # date_time_str = f"{date} {time_}"
-
-                        insert_speed_violation(
-                            camera_id=db_camera_id, track_id=track_id,
-                            plate_number=buf["number"], vehicle_type=buf["vtype"],
-                            vehicle_class=stored_cls,
-                            plate_img_path=_normalize_db_path(p_path),
-                            vehicle_img_path=_normalize_db_path(v_path),
-                            confidence=buf["score"], speed_kmph=speed_kmph,
-                            speed_limit=SPEED_LIMIT_KMPH, clip_path=clip_path,
-                            vehicle_color=vehicle_color,created_at=best_timestamp
-                        )
                         cv2.putText(frame_resized, "SPEED!",
                                     (x1, y1-28), cv2.FONT_HERSHEY_SIMPLEX,
                                     0.6, (0, 140, 255), 2)
@@ -966,8 +1013,13 @@ def run_camera(camera_info: dict, roi_polygon: np.ndarray,
         cv2.destroyAllWindows()
         if clip_manager is not None:
             clip_manager.release_all()
+        if ocr_work_queue is not None and ocr_thread is not None:
+            try:
+                ocr_work_queue.put(None, timeout=1)
+                ocr_thread.join(timeout=10)
+            except Exception:
+                pass
         set_camera_status(cam_id, "inactive")
         print(f"{TAG} Stopped. Counts: {counts}")
 
     return completed_successfully
-
