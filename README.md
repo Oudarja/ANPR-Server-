@@ -1,257 +1,176 @@
-### ANPR Server
+# ANPR Project
 
-Automatic Number Plate Recognition (ANPR) server for real-time and recorded video processing. The system detects vehicles, recognizes license plates, tracks vehicles across frames, estimates 
-speed, detects violations, records evidence clips, and stores events in a database. The pipeline is built using YOLO, OpenCV, OCR, and multi-camera processing. ANPR systems commonly combine 
-vehicle detection, plate localization, OCR, tracking, and database logging to automate traffic monitoring and enforcement workflows.
+Automatic Number Plate Recognition and traffic-violation processing system for multi-camera video feeds. The project combines vehicle detection, plate detection, OCR, tracking, speed estimation, clip generation, and MySQL logging.
 
-### Features
- - Multi-camera processing
- - RTSP and local video file support
- - Vehicle detection using YOLO
- - License plate detection and recognition
- - Vehicle tracking using SORT
- - Vehicle color classification
- - Speed estimation
- - Speed violation detection
- - Automatic evidence clip generation
- - OCR-based timestamp extraction
- - Database integration for event logging
- - Camera status monitoring 
- - Live preview dashboard
- - Automatic file watching and processing
- - Multiprocessing architecture for handling multiple cameras simultaneously
+## What It Does
 
-### System Architecture
+- Processes multiple cameras in parallel
+- Supports RTSP streams and local/uploaded video files
+- Detects vehicles with YOLO
+- Detects license plates with a separate YOLO model
+- Reads plate text with OCR and multi-frame voting
+- Estimates vehicle speed and flags speed violations
+- Saves evidence clips for violations
+- Extracts timestamps from video frames
+- Stores detections and violations in MySQL
+- Watches upload folders and processes new videos automatically
+
+## Main Components
+
+- `main_new.py` - launcher that loads active cameras and starts worker processes
+- `camera_worker.py` - per-camera detection, tracking, OCR, and violation handling
+- `helpers.py` - plate matching, OCR voting, and plate text parsing
+- `ocr.py` - timestamp extraction from video frames
+- `clip.py` - non-blocking clip writer for violation evidence
+- `database.py` - MySQL schema and query helpers
+- `config.py` - model paths, database settings, thresholds, and folder mapping
+
+## Repository Layout
+
+```text
+.
+├── main_new.py
+├── camera_worker.py
+├── database.py
+├── helpers.py
+├── ocr.py
+├── clip.py
+├── sort.py
+├── config.py
+├── req.txt
+├── yolov8n.pt
+├── ashraf.pt
+├── yolov8n.onnx
+├── ashraf.onnx
+└── Image_Sharpening/
 ```
+
+## Runtime Flow
+
+```text
 Camera / Video File
         │
         ▼
- Vehicle Detection (YOLO)
+Vehicle Detection (YOLO)
         │
         ▼
- Vehicle Tracking (SORT)
+Tracking (SORT)
         │
-        ├────────► Speed Estimation
-        │
-        ├────────► Vehicle Color Detection
+        ├──► Speed Estimation
+        ├──► Vehicle Color Detection
+        ▼
+Plate Detection (YOLO)
         │
         ▼
- Plate Detection (YOLO)
+OCR + Voting
         │
         ▼
- OCR / Plate Recognition
-        │
-        ▼
- Database Logging
-        │
-        ├────────► Detected Vehicles
-        ├────────► Speed Violations
-        └────────► Evidence Clips
+MySQL Logging
+        ├── detected_plates
+        ├── violations
+        └── speed_violations
 ```
 
-### Project Structure
-```
-ANPR-Server/
-│
-├── main_new.py                 # Main application entry point
-├── camera_worker.py            # Camera processing worker
-├── database.py                 # Database operations
-├── helpers.py                  # Utility functions
-├── config.py                   # Configuration settings
-├── clip.py                     # Violation clip generation
-├── ocr.py                      # Timestamp OCR extraction
-├── sort.py                     # SORT tracker
-│
-├── uploads/
-│   └── camera_id/
-│       └── YYYYMMDD/
-│           └── validations/
-│
-├── models/
-│   ├── vehicle.pt
-│   └── plate.pt
-│
-└── requirements.txt
-```
-### Detection Pipeline
-#### Vehicle Detection
-The system uses YOLO models to detect:
-- Car
-- Motorbike
-- Bus
-- Truck
-#### Plate Recognition
-  - Vehicle detected
-  - License plate localized
-  - Plate cropped
-  - OCR applied
-  - Voting mechanism used for improved accuracy
-  - Result stored in database
-#### Speed Detection
-Vehicle speed is estimated using:
+## Installation
 
-```
-Distance Travelled (pixels)
-           │
-           ▼
-Pixels Per Meter Calibration
-           │
-           ▼
-Speed (km/h)
-```
-Speed violations are automatically recorded when:
-```
-Vehicle Speed > Configured Speed Limit
-```
-### OCR Timestamp Extraction
+1. Create and activate a virtual environment.
 
-The system extracts timestamp overlays directly from video frames.
-
-Features:
-
-- Multiple preprocessing strategies
-- Threshold voting
-- OCR result voting
-- Timestamp validation
-- Automatic fallback handling
-
-Example:
-```
-15/06/2026 13:50:44
-```
-Converted to:
-```
-2026-06-15 13:50:44
-```
-
-### Database Records
-
-#### Detected Plates
-
-Stores:
-
-- id
-- camera_id
-- track_id
-- plate_number
-- vehicle_type
-- vehicle_class
-- plate_img_path
-- vehicle_img_path
-- confidence
-- detected_at
-- vehicle_color
-- status
-- notes
-- location_id
-- created_at
-- updated_at
-
-#### Speed Violations
-
-Stores:
-- id
-- camera_id
-- track_id
-- plate_number
-- vehicle_type
-- vehicle_class
-- plate_img_path
-- vehicle_img_path
-- confidence
-- speed_kmph
-- speed_limit
-- clip_path
-- vehicle_color
-- violated_at
-- created_at
-- updated_at
-
-### Installation
-#### Clone Repository
-```
-git clone https://github.com/Oudarja/ANPR-Server.git
-cd ANPR-Server
-```
-#### Create Virtual Environment
-```
+```bash
 python -m venv .venv
 source .venv/bin/activate
 ```
-#### Install Dependencies
 
-```
-pip install -r requirements.txt
-```
-### Configuration
+2. Install dependencies.
 
-Update settings inside:
-
-```
-config.py
-```
-Important parameters:
-```
-SPEED_LIMIT_KMPH
-PIXELS_PER_METER
-
-VEHICLE_MODEL
-PLATE_MODEL
-
-UPLOAD_ROOT
-
-MONITOR_WIDTH
-MONITOR_HEIGHT
-
+```bash
+pip install -r req.txt
 ```
 
-### Running the Server
-```
+3. Make sure MySQL is running and the database credentials in `config.py` are correct.
+
+## Configuration
+
+Key settings live in `config.py`:
+
+- `DB_CONFIG` - MySQL connection details
+- `UPLOAD_ROOT` - root folder watched for videos
+- `CAMERA_FOLDER_MAP` - camera ID to upload-folder mapping
+- `VEHICLE_MODEL` - vehicle detector path
+- `PLATE_MODEL` - plate detector path
+- `SPEED_LIMIT_KMPH` - speed threshold
+- `PIXELS_PER_METER` - calibration value used for speed estimation
+- `MONITOR_WIDTH` / `MONITOR_HEIGHT` - processing frame size
+
+The project currently uses:
+
+- `yolov8n.pt` for vehicle detection
+- `ashraf.pt` for plate detection
+- `easyocr` for OCR-based timestamp reading in `ocr.py`
+
+## Database
+
+The application initializes and uses these tables:
+
+- `cameras`
+- `detected_plates`
+- `violations`
+- `speed_violations`
+
+The schema is created by `init_db()` in `database.py` when the app starts.
+
+## Running
+
+Start the main launcher:
+
+```bash
 python main_new.py
 ```
-### Output Directory Structure
-```
+
+The app loads active cameras from MySQL, starts a worker for each one, and begins processing available streams or files.
+
+## Output
+
+Processed videos and evidence are organized under the upload root defined in `config.py`. A typical structure looks like:
+
+```text
 uploads/
 └── 201/
     └── 20260617/
         └── validations/
             ├── clips/
-            ├── detected_1_vehicle.jpg
-            ├── detected_1_plate.jpg
-            ├── s1_vehicle.jpg
-            └── s1_plate.jpg
+            ├── detected_*.jpg
+            ├── plate_*.jpg
+            └── vehicle_*.jpg
 ```
-### Technologies Used
-  - Python
-  - OpenCV
-  - YOLO
-  - SORT Tracker
-  - Tesseract OCR
-  - NumPy
-  - MySQL
-  - Multiprocessing
 
-### Use Cases
-- Traffic Monitoring
-- Smart City Applications
-- Toll Booth Monitoring
-- Parking Management
-- Vehicle Access Control
-- Speed Enforcement
-- Security Surveillance
-- Law Enforcement Analytics
+Violation clips are saved as browser-friendly MP4 files with a short pre-roll and post-roll.
 
-Future Improvements
-- TensorRT Optimization
-- PaddleOCR Integration
-- Vehicle Make/Model Recognition
-- Lane Violation Detection
-- Traffic Signal Violation Detection
-- Real-Time Dashboard
-- REST API
-- Kafka-Based Event Streaming
-- Distributed Multi-Server Processing
+## OCR Notes
 
+`ocr.py` extracts timestamp overlays from the top-left area of each frame. It uses multiple preprocessing strategies and is designed to be called safely from threaded or multi-process camera workers without changing the OCR logic. When OCR fails, it falls back safely.
 
+## Calibration Notes
 
+Speed estimation depends on camera geometry and calibration values in `config.py`. If the camera angle or coverage changes, update:
 
+- `CAMERA_ANGLE_DEG`
+- `COVERAGE_FEET`
+- `PIXELS_PER_METER`
+
+## Optional Utilities
+
+The repository also includes a few helper/test scripts such as:
+
+- `test_ocr.py`
+- `check_video.py`
+- `calibrate_camera.py`
+- `move_file.py`
+- `sort.py`
+
+## Requirements
+
+Python packages are listed in `req.txt`.
+
+## License
+
+No license file is included yet. Add one if you plan to share or publish the project.
